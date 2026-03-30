@@ -2,7 +2,6 @@
 
 namespace App\Console\Commands;
 
-use HttpServer;
 use Illuminate\Console\Command;
 
 class general extends Command
@@ -28,8 +27,9 @@ class general extends Command
      */
     public function handle()
     {
-        $service = new HttpServer('192.168.100.34',8004,'admin','Corepay@1');
-        dd($service->start());
+        $service = new HttpServer('0.0.0.0',8004,'admin','Corepay@1');
+        $service->start();
+        $service->request('corepay','POST', 'cgi-bin/api/AccessAppHelper/attachUSB');
     }
 
     function generateLicense($company, $expiryDate, $secret)

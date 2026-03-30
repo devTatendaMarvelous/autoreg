@@ -1,98 +1,48 @@
 <?php
 
 namespace App\Console\Commands;
-
 class HttpServer
 {
     private $server;
     private $clients = [];
-    private $lastResponses = [];
     private $deviceMap = ['corepay'];      // DeviceID => socket
     private $tokenMap = [];       // socket id => token
-    private $controlServer;
+
     private $username;
     private $password;
 
     public function __construct($ip, $port, $username, $password)
     {
         $this->server = stream_socket_server("tcp://$ip:$port", $errno, $errstr);
-
-        // 👇 NEW: control port (e.g. 9001)
-        $this->controlServer = stream_socket_server("tcp://127.0.0.1:9001", $e2, $eStr);
-
-        if (!$this->server || !$this->controlServer) {
+        if (!$this->server) {
             die("Error: $errstr ($errno)\n");
         }
-
-        stream_set_blocking($this->server, false);
-        stream_set_blocking($this->controlServer, false);
 
         $this->username = $username;
         $this->password = $password;
 
         echo "Server started at $ip:$port\n";
-        echo "Control server at 127.0.0.1:9001\n";
     }
 
     public function start()
     {
         while (true) {
+            $client = @stream_socket_accept($this->server, 1);
 
-            // 👇 Accept device connections
-            $client = @stream_socket_accept($this->server, 0);
             if ($client) {
-                stream_set_blocking($client, false);
                 $this->clients[] = $client;
                 echo "New client connected\n";
             }
 
-            // 👇 Accept control commands
-            $control = @stream_socket_accept($this->controlServer, 0);
-            if ($control) {
-
-                $input = fread($control, 2048);
-
-                if (!$input) {
-                    fclose($control);
-                    continue;
-                }
-
-                $cmd = json_decode($input, true);
-
-                if (!$cmd) {
-                    fwrite($control, json_encode([
-                        "error" => "Invalid JSON",
-                        "raw" => $input
-                    ]));
-                    fclose($control);
-                    continue;
-                }
-
-                $result = $this->request(
-                    $cmd['deviceId'],
-                    $cmd['method'],
-                    $cmd['uri'],
-                    $cmd['data'] ?? ""
-                );
-
-                fwrite($control, json_encode([
-                    "status" => $result ?? "failed"
-                ]));
-
-                fclose($control);
-            }
-
-            // 👇 Handle device messages
-            foreach ($this->clients as $client) {
-
+            foreach ($this->clients as $key => $client) {
                 $data = fread($client, 2048);
+
                 if (!$data) continue;
 
                 echo "Received:\n$data\n";
+
                 $this->handleRequest($client, $data);
             }
-
-            usleep(100000); // prevent CPU burn
         }
     }
 
@@ -199,10 +149,24 @@ class HttpServer
                 "Content-Length: 0\r\n\r\n";
 
             fwrite($client, $req);
+            $this->request('corepay','POST', 'cgi-bin/api/AccessAppHelper/attachUSB');
+$data= json_encode( [
+    "exportType" => "ShiftInfo",
+    "method"=>1,
+    "startTime"=>"2025-03",
+    "endTime"=>"2025-03"
+]);
+            $this->request('corepay','POST', 'cgi-bin/api/AccessAppHelper/exportUSB',$data);
+
             echo "Heartbeat sent\n";
         }
     }
 
+
+
+
+
+    // 对外发送请求
     public function request($deviceId, $method, $uri, $data = "")
     {
         if (!isset($this->deviceMap[$deviceId])) {
@@ -213,39 +177,15 @@ class HttpServer
         $client = $this->deviceMap[$deviceId];
         $token = $this->tokenMap[intval($client)] ?? "";
 
-        // Build request
-        $req = "$method $uri HTTP/1.1\r\n";
-        if (!empty($token)) {
-            $req .= "X-cgi-token: $token\r\n";
-        }
-        $req .= "Content-Length: " . strlen($data) . "\r\n\r\n";
-        $req .= $data;
+        $req =
+            "$method $uri HTTP/1.1\r\n" .
+            "X-cgi-token: $token\r\n" .
+            "Content-Length: " . strlen($data) . "\r\n\r\n" .
+            $data;
 
-        fwrite($client, $req);
-
-        // For GET file download, capture the response fully
-        if (strtoupper($method) === 'GET' && strpos($uri, 'downloadFile') !== false) {
-            $raw = '';
-            stream_set_blocking($client, true); // make sure fread waits
-            while (!feof($client)) {
-                $chunk = fread($client, 8192);
-                if ($chunk === false) break;
-                $raw .= $chunk;
-            }
-
-            // Strip HTTP headers
-            if (strpos($raw, "\r\n\r\n") !== false) {
-                $parts = explode("\r\n\r\n", $raw, 2);
-                $fileData = $parts[1] ?? '';
-            } else {
-                $fileData = $raw;
-            }
-            echo "File downloaded: " . strlen($fileData) . " bytes\n";
-
-            return $fileData; // return actual file content
-        }
-
-        // For normal API calls, just return "sent"
-        return ["status" => "sent"];
+       $res= fwrite($client, $req);
+echo $res;
+        echo "Request sent to $deviceId\n";
+        return true;
     }
 }
