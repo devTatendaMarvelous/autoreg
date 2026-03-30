@@ -8,6 +8,9 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Str;
 use App\Models\Employee;
 use Symfony\Component\HttpFoundation\Response;
+use App\Events\DahuaConnected;
+use App\Events\DahuaLoggedIn;
+use App\Events\DahuaHeartbeatReceived;
 
 class DahuaAutoRegistrationController extends Controller
 {
@@ -19,6 +22,9 @@ class DahuaAutoRegistrationController extends Controller
     {
         // Log for your terminal monitoring
         \Log::info("Dahua CGI: Connect attempt from " . $request->ip());
+
+        // Broadcast event
+        broadcast(new DahuaConnected($request->ip()));
 
         // 4.19.1: Return 200 OK with NO body [cite: 2168, 2178]
         $response = new Response();
@@ -51,6 +57,9 @@ class DahuaAutoRegistrationController extends Controller
         // Cache token for the Heartbeat interface validation[cite: 2218].
         Cache::put("dahua_token_" . $request->ip(), $token, now()->addMinutes(60));
 
+        // Broadcast event
+        broadcast(new DahuaLoggedIn($request->ip(), $token));
+
         // The response must be a JSON object containing the Token key[cite: 2214, 2215].
         return response()->json([
             "Token" => $token,
@@ -71,6 +80,9 @@ class DahuaAutoRegistrationController extends Controller
         if ($token && $token === $storedToken) {
             // Extend the token lifetime upon successful heartbeat[cite: 2219].
             Cache::put("dahua_token_" . $request->ip(), $token, now()->addMinutes(60));
+
+            // Broadcast event
+            broadcast(new DahuaHeartbeatReceived($request->ip()));
 
             // Response is 200 OK with no body[cite: 2223].
             return response('', 200)

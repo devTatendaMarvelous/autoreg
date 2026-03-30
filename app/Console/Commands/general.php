@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use HttpServer;
 use Illuminate\Console\Command;
 
 class general extends Command
@@ -27,15 +28,8 @@ class general extends Command
      */
     public function handle()
     {
-        define('LICENSE_SECRET', '9f2c7a4e1b6d8c3f5a0e9b2c4d6f8a1e3c5b7d9f2a4c6e8b0d1f3a5c7e9b2d4');
-        $key = $this->generateLicense('Test', '2026-06-06', LICENSE_SECRET);
-
-        var_dump($key);
-
-        $isValid = $this->verifyLicense($key, 'Test', 'LICENSE_SECRET');
-
-        var_dump($isValid);
-        return;
+        $service = new HttpServer('192.168.100.34',8004,'admin','Corepay@1');
+        dd($service->start());
     }
 
     function generateLicense($company, $expiryDate, $secret)
