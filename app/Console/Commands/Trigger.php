@@ -16,7 +16,8 @@ class Trigger extends Command
                             {--output= : Output filename (defaults to exported fileName)}
                             {--no-subscribe : Skip attachUSB subscription step}
                             {--task-timeout=90 : Seconds to wait for export task completion}
-                            {--debug : Print request/response details}';
+                            {--debug : Print request/response details}
+                            {--export-format=json : exportUSB body format (json|form)}';
     protected $description = 'Trigger corepay subscription, export, and download';
 
     private ?string $resolvedDeviceId = null;
@@ -203,24 +204,58 @@ class Trigger extends Command
 
         [$startNorm, $endNorm] = $this->normalizeExportTimeRange($start, $end);
 
-        $payload = json_encode([
+        $exportFormat = strtolower((string)$this->option('export-format'));
+
+        $jsonPayload = json_encode([
             "exportType" => $exportType,
             "method"     => $method,
             "startTime"  => $startNorm,
             "endTime"    => $endNorm
         ]);
+        $formPayload = $this->buildExportUsbFormBody($exportType, $method, $startNorm, $endNorm);
 
-        // Try POST + JSON first (common for Dahua-style CGI APIs)
+        // Although some docs/screens show form-urlencoded, this device has been returning taskID
+        // reliably with JSON. Default is JSON; form is fallback.
+        $primaryBody = $exportFormat === 'form' ? $formPayload : $jsonPayload;
+
         $status = $this->sendControl([
             "deviceId" => $deviceId,
             "method"   => "POST",
             "uri"      => "/cgi-bin/api/AccessAppHelper/exportUSB",
-            "data"     => $payload
+            "data"     => $primaryBody
         ]);
 
         $this->info("exportUSB sent");
         $this->printDebugStatus($status);
-        $this->appendExportUsbLog('POST json', $status);
+        $this->appendExportUsbLog('POST primary', $status);
+
+        // If primary fails (HTTP 4xx/5xx) OR returns empty body, try secondary format (json <-> form)
+        // before GET variants.
+        $primaryBodyText = $this->extractHttpBody((string)($status['raw'] ?? '')) ?? '';
+        if (!($status['ok'] ?? false) || trim($primaryBodyText) === '') {
+            $secondaryBody = $exportFormat === 'form' ? $jsonPayload : $formPayload;
+            $this->warn("exportUSB primary failed/empty; retrying with secondary format...");
+            $status2 = $this->sendControl([
+                "deviceId" => $deviceId,
+                "method"   => "POST",
+                "uri"      => "/cgi-bin/api/AccessAppHelper/exportUSB",
+                "data"     => $secondaryBody
+            ]);
+            $this->printDebugStatus($status2);
+            $this->appendExportUsbLog('POST secondary', $status2);
+
+            $secondaryBodyText = $this->extractHttpBody((string)($status2['raw'] ?? '')) ?? '';
+            if (($status2['ok'] ?? false) && trim($secondaryBodyText) !== '') {
+                $status = $status2;
+            } elseif (($status2['ok'] ?? false) && trim($secondaryBodyText) === '' && ($status['ok'] ?? false) && trim($primaryBodyText) !== '') {
+                // keep primary if it had content
+            } elseif (($status['ok'] ?? false) && trim($primaryBodyText) !== '') {
+                // keep primary
+            } else {
+                // keep the "best" (prefer ok=true)
+                $status = ($status2['ok'] ?? false) ? $status2 : $status;
+            }
+        }
 
         $status = $this->maybeRetryExportAsGet($deviceId, $exportType, $method, $startNorm, $endNorm, $status);
         if ($status === null) {
