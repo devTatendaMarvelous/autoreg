@@ -212,11 +212,21 @@ class HttpServer
         $client = $this->deviceMap[$deviceId];
         $token = $this->tokenMap[intval($client)] ?? "";
 
+        // Normalize uri
+        if ($uri === '' || $uri === null) {
+            return ["ok" => false, "error" => "Empty URI"];
+        }
+        if ($uri[0] !== '/') {
+            $uri = '/' . $uri;
+        }
+
         // Build request
         $req = "$method $uri HTTP/1.1\r\n";
         if (!empty($token)) {
             $req .= "X-cgi-token: $token\r\n";
         }
+        $req .= "Host: 127.0.0.1\r\n";
+        $req .= "Accept: application/json\r\n";
         $req .= "Content-Length: " . strlen($data) . "\r\n\r\n";
         $req .= $data;
 
@@ -245,6 +255,12 @@ class HttpServer
         }
 
         // For normal API calls, just return "sent"
-        return ["status" => "sent"];
+        return ["status" => "sent", "sent" => $this->summarizeRequest($req)];
+    }
+
+    private function summarizeRequest(string $req): string
+    {
+        if (strpos($req, "\r\n\r\n") === false) return $req;
+        return explode("\r\n\r\n", $req, 2)[0];
     }
 }

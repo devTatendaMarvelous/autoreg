@@ -13,25 +13,54 @@ class general extends Command
      *
      * @var string
      */
-    protected $signature = 'general';
+    protected $signature = 'general
+                            {--ip=0.0.0.0 : IP address to bind the device listener}
+                            {--port=8004 : Port to bind the device listener}
+                            {--username=admin : Device username}
+                            {--password=Corepay@1 : Device password}
+                            {--controlPort=9001 : Local control port for trigger command}';
 
     /**
      * The console command description.
      *
      * @var string
      */
-    protected $description = 'Command description';
+    protected $description = 'Start device connection server (listener + control port)';
 
     /**
      * Execute the console command.
      */
     public function handle()
     {
-        $service = new HttpServer('0.0.0.0',8004,'admin','Corepay@1');
-        $service->start();
-        $service->request('corepay','POST', 'cgi-bin/api/AccessAppHelper/attachUSB');
+        $ip = (string)$this->option('ip');
+        $port = (int)$this->option('port');
+        $username = (string)$this->option('username');
+        $password = (string)$this->option('password');
+        $controlPort = (int)$this->option('controlPort');
+
+        $this->info("Starting device listener on {$ip}:{$port}");
+        $this->info("Starting local control server on 127.0.0.1:{$controlPort}");
+        $this->info("Leave this running, then use `php artisan trigger` to export/download.");
+
+        $service = new HttpServer($ip, $port, $username, $password, $controlPort);
+        $service->start(); // blocks and keeps the device connection alive
     }
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    
     function generateLicense($company, $expiryDate, $secret)
     {
         // Convert expiry to timestamp
